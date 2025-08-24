@@ -71,18 +71,17 @@ Once registered, you simply need to add Athena to your personal server using the
 
 ## Commands
 
-`&join`	           Have the bot join your current voice channel
-`&leave`	       Disconnect the bot from the channel
-`&play <url>`	   Play a YouTube song (auto-joins if not in VC)
-`&pause`	       Pause playback
-`&resume`	       Resume playback
-`&skip`	           Skip the current song
-`&loop`	           Toggle looping the current track
-`&nowplaying`	    Show details of the current song
-`&search <query>`	Search YouTube for a song (lists 5 results)
-`&pick <1-5>`	    Play one of the search results
-`&help`            Display all commands.
-
+- `&join` – Have the bot join your current voice channel  
+- `&leave` – Disconnect the bot from the channel  
+- `&play <url>` – Play a YouTube song (auto-joins if not in VC)  
+- `&pause` – Pause playback  
+- `&resume` – Resume playback  
+- `&skip` – Skip the current song  
+- `&loop` – Toggle looping the current track  
+- `&nowplaying` – Show details of the current song  
+- `&search <query>` – Search YouTube for a song (lists 5 results)  
+- `&pick <1-5>` – Play one of the search results  
+- `&help` – Display all commands  
 
 
 ---
