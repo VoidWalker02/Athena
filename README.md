@@ -1,7 +1,11 @@
 #  Athena – A Simple Discord Music Bot
 
+Have you ever wanted to play music in yiur Discord VC with a youtube link and you both hate the built-in watch together (ads) and can't find whatever you need on spotify? Fear no more! Your self-hostable solution is here!
+
 Athena is a lightweight music bot for Discord written in Python using [discord.py](https://discordpy.readthedocs.io/) and [yt-dlp](https://github.com/yt-dlp/yt-dlp).  
 It can join your voice channels, play music directly from YouTube links or search queries, and provides basic queue and playback controls.
+
+With a little bit of setup, you can have your own music bot for your own server.
 
 ---
 
