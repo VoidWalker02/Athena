@@ -3,6 +3,10 @@ from discord.ext import commands
 import yt_dlp as youtube_dl  # Use yt-dlp instead of youtube_dl
 import asyncio
 import time
+import re
+from collections import defaultdict, deque
+import random
+
 
 # Define intents
 intents = discord.Intents.default()
@@ -14,12 +18,16 @@ current_webpage_url = None
 current_thumbnail = None
 current_requester_id = None
 search_results = {}
+volume = 1.0
+queues = defaultdict(deque)
+
 
 YDL_SEARCH_OPTS = {
     "format": "bestaudio[ext=m4a]/bestaudio/best",  # prefer stable m4a over HLS
     "noplaylist": True,
     "quiet": True,
     "force_generic_extractor": False,
+    "extractor_args": {"youtube": {"player_client": ["android"]}},
 }
 
 
@@ -46,6 +54,80 @@ def _fmt_time(sec):
     m, s = divmod(sec, 60)
     h, m = divmod(m, 60)
     return f"{h}:{m:02d}:{s:02d}" if h else f"{m:02d}:{s:02d}"
+
+def _headers_str(h: dict | None) -> str:
+    # FFmpeg expects CRLF between headers
+    if not h: return ""
+    return "\r\n".join(f"{k}: {v}" for k, v in h.items())
+
+def _clamp(x, lo, hi):
+    return max(lo,min(hi,x))
+
+def _parse_timestamp(s: str):
+    """
+    Accepts 'SS', 'MM:SS', or 'HH:MM:SS'. Returns total seconds (int) or None.
+    """
+    s = s.strip()
+    if re.fullmatch(r"\d+", s):  # seconds only
+        return int(s)
+    parts = s.split(":")
+    if not all(p.isdigit() for p in parts):
+        return None
+    if len(parts) == 2:  # MM:SS
+        m, sec = map(int, parts)
+        return m * 60 + sec
+    if len(parts) == 3:  # HH:MM:SS
+        h, m, sec = map(int, parts)
+        return h * 3600 + m * 60 + sec
+    return None
+
+def is_playlist_link(url: str) -> bool:
+    return "list=" in url or "/playlist?" in url
+
+def extract_playlist(url: str, max_items: int = 50):
+    """
+    Returns a list of (webpage_url, title, duration|None) for a YouTube playlist/mix.
+    Uses flat extraction for speed; duration may be None.
+    """
+    opts = {
+        **YDL_SEARCH_OPTS,
+        "noplaylist": False,                  # allow playlist extraction here
+        "extract_flat": "in_playlist",       # no stream links; fast
+        "quiet": True,
+    }
+    with youtube_dl.YoutubeDL(opts) as ydl:
+        info = ydl.extract_info(url, download=False)
+
+    # Normalize to a list of entries
+    entries = info.get("entries") or []
+    out = []
+    for e in entries[:max_items]:
+        vid_id = e.get("id")
+        title = e.get("title", "Unknown")
+        duration = e.get("duration")  # often None in flat
+        page_url = e.get("url") or (f"https://www.youtube.com/watch?v={vid_id}" if vid_id else None)
+        if page_url:
+            # Sometimes flat URLs are just video IDs; ensure full URL
+            if not page_url.startswith("http"):
+                page_url = f"https://www.youtube.com/watch?v={page_url}"
+            out.append((page_url, title, duration))
+    return out
+    
+
+
+async def play_next_in_queue(ctx):
+    """Helper function to play next track on server's queue."""
+
+    guild_id = ctx.guild.id
+    vc = ctx.voice_client
+
+    if not vc or not vc.is_connected():
+        return
+    if not queues[guild_id]:
+        await ctx.send("Queue is now empty.")
+        return
+    next_url, next_title, requester_id, duration = queues[guild_id].popleft()
+    await ctx.invoke(play, url=next_url)
 
 @bot.command()
 async def join(ctx):
@@ -82,7 +164,7 @@ async def join(ctx):
                 await asyncio.sleep(0.5)
 
             # Fresh connect; disable session resume
-            await channel.connect(timeout=10.0, reconnect=False)
+            await channel.connect(timeout=10.0)
             await ctx.send(f"Joined {channel.mention}.")
 
         except asyncio.TimeoutError:
@@ -194,7 +276,7 @@ async def search(ctx, *, query: str):
             return await ctx.send(f" Search failed: {e}")
 
     if not results:
-        return await ctx.send("🔎 No results found.")
+        return await ctx.send(" No results found.")
 
     # cache them per (guild, user)
     out = []
@@ -232,10 +314,10 @@ async def pick(ctx, index: int):
     
     max_idx = min(5,len(results))
     if not (1<= index <= max_idx):
-        return await ctx.send("Please input a number between 1 and {max_idx}.")
+        return await ctx.send(f"Please input a number between 1 and {max_idx}.")
 
     choice = results[index-1]
-    title = choice.get("title, Unknown")
+    title = choice.get("title", "Unknown")
     url = choice.get("webpage_url") or choice.get("url")
 
     if not url:
@@ -248,8 +330,194 @@ async def pick(ctx, index: int):
         await ctx.invoke(play, url=url)
     except Exception as e:
         await ctx.send(f"Failed to play **{title}**: {e}")
+
+@bot.command()
+async def vol(ctx, percent: int | None = None):
+    """Get/Set global volume for the bot. Volume values go from 0 - 200. """
+
+    global volume
+
+    if percent is None:
+        cur = int(round(volume * 100))
+        return await ctx.send(f"Current volume: **{cur}%**")
+
+    try:
+        p = int(percent)
+    except ValueError:
+        return await ctx.send("Please enter a whole number between 0 and 200.")
+
+    p = _clamp(percent, 0, 200)
+    volume = p / 100.0
+
+    #adjust volume live if playing
+
+    vc = ctx.voice_client 
+    if vc and vc.source:
+        try:
+            if isinstance(vc.source, discord.PCMVolumeTransformer):
+                vc.source.volume = volume
+            else:
+                vc.source = discord.PCMVolumeTransformer(vc.source, volume=volume)
+        except Exception:
+            pass
+
+        await ctx.send(f"Volume has been set to **{p}%**")
+
+@bot.command()
+async def seek(ctx, position: str):
+    """Jump to a timestamp in the current track. Accepts seconds, m:s and h:m:s """
+    vc = ctx.voice_client
+    if not vc or not (vc.is_playing() or vc.is_paused()):
+        return await ctx.send(" Nothing is playing.")
+
+    # parse time
+    seconds = _parse_timestamp(position)
+    if seconds is None or seconds < 0:
+        return await ctx.send(" Time must be SS, MM:SS, or HH:MM:SS.")
+
+    # we need to know what to re-extract (page URL). If missing, bail nicely.
+    if not current_webpage_url:
+        return await ctx.send("I don't have the source URL for this track. Try playing it again, then seek.")
+
+    # re-extract a fresh direct audio URL (avoids expired links)
+    try:
+        with youtube_dl.YoutubeDL(YDL_SEARCH_OPTS) as ydl:
+            info = ydl.extract_info(current_webpage_url, download=False)
+            stream_url = info["url"]
+    except Exception as e:
+        return await ctx.send(f"Couldn't refresh the stream: {e}")
+
+    # restart FFmpeg from the desired offset
+    try:
+        before = f"-ss {seconds} -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5"
+        ffmpeg_opts = "-vn"
+        vc.stop()
+        vc.play(
+            discord.FFmpegPCMAudio(stream_url, before_options=before, options=ffmpeg_opts),
+            after=lambda e: print(f"[seek] ffmpeg error: {e}") if e else None
+        )
+        await ctx.send(f"Seeked to **{position}**.")
+    except Exception as e:
+        await ctx.send(f"Seek failed: {e}")
+
+
+@bot.command()
+async def queue(ctx):
+    """Displays the current queue."""
+
+    q = queues[ctx.guild.id]
+    if not q:
+        return await ctx.send("The queue is currently empty.")
+
+   # Format each queued song like search results
+    out = []
+    for i, (url, title, requester_id, duration) in enumerate(q, start=1):
+        member = ctx.guild.get_member(requester_id)
+        requester = f" • {member.display_name}" if member else ""
+        dur_str = _fmt_time(duration) if duration else "Unknown"
+        line = f"{i}. {title or 'Unknown'} ({dur_str}{requester})\n{url}"
+        out.append(line)
+
+    msg = "\n\n".join(out)
+    await ctx.send(f"**Current Queue ({len(q)} tracks):**\n```{msg}```")
+
+       
     
+@bot.command()
+async def clear(ctx):
+    """Clear the current queue."""
+    queues[ctx.guild.id].clear()
+    await ctx.send("Queue cleared.")
+
+@bot.command()
+async def shuffle(ctx):
+    q = queues[ctx.guild.id]
+    if not q:
+        return await ctx.send("Queue is empty.")
+    tmp = list(q)
+    random.shuffle(tmp)
+    queues[ctx.guild.id] = deque(tmp)
+    await ctx.send("Queue shuffled.")
+
+@bot.command()
+async def skipto(ctx, index: int):
+    """Skip to a specific song in the queue (1 = next up)."""
+    q = queues[ctx.guild.id]
+    if not q:
+        return await ctx.send("Queue is empty.")
+
+    n = len(q)
+    if index < 1 or index > n:
+        return await ctx.send(f"Index must be between 1 and {n}.")
+
+    # Peek target title for feedback (queue stores 4-tuples)
+    target_url, target_title, _, _ = list(q)[index - 1]
+
+    # Drop items before the chosen index so it becomes the head
+    for _ in range(index - 1):
+        q.popleft()
+
+    await ctx.send(f"Skipping to **{target_title or 'Unknown'}** (#{index}).")
+
+    vc = ctx.voice_client
+    if vc and (vc.is_playing() or vc.is_paused()):
+        # Just stop; your play()'s after() will advance to the new head.
+        vc.stop()
+    else:
+        # Nothing playing; start the new head immediately.
+        await play_next_in_queue(ctx)
+
+
+@bot.command()
+async def move(ctx, old: int, new: int):
+    """Move a track to a different position in the queue."""
+    q = queues[ctx.guild.id]
+    if not q:
+        return await ctx.send("Queue is empty.")
+    if not (1 <= old <= len(q) and 1 <= new <= len(q)):
+        return await ctx.send(f"Indexes must be between 1 and {len(q)}.")
+    item = q[old-1]
+    del q[old-1]
+    q.insert(new-1, item)
+    await ctx.send(f"Moved **{item[1]}** to position {new}.")
+
+@bot.command()
+async def playlist(ctx, url: str, limit: int = 50):
+    """Enqueue a Youtube Playlist, standard limit is 50, goes up to 200. """
+
+    if limit < 1 or limit > 200:
+        return await ctx.send("Limit must be between 1 and 200.")
     
+    if not is_playlist_link(url):
+        return await ctx.send("This does not appear to be a playlist link. Please use the regular play command.")
+
+    await ctx.send("Loading playlist, this may take a moment.")
+
+    try:
+        entries = extract_playlist(url, max_items=limit)
+    except Exception as e:
+        return await ctx.send("No playable entries located.")
+
+    q = queues[ctx.guild.id]
+    added = 0
+    for page_url, title, duration in entries:
+        q.append((page_url,title,ctx.author.id,duration))
+        added += 1
+
+    #if nothing is playing, start playback
+
+    vc = ctx.voice_client
+    if not vc:
+        await ctx.invoke(join)
+        vc = ctx.voice_client
+    if vc and not (vc.is_playing() or vc.is_paused()):
+        await play_next_in_queue(ctx)
+
+    # Nice summary (first few items)
+    preview = "\n".join(f"{i+1}. {entries[i][1]}" for i in range(min(5, len(entries))))
+    more = f"\n… and {len(entries)-5} more." if len(entries) > 5 else ""
+    await ctx.send(f"Added **{added}** tracks to the queue.\n```{preview}{more}```") 
+
 
 
 
@@ -259,50 +527,96 @@ async def pick(ctx, index: int):
 async def play(ctx, url: str):
     """Command to play audio from a YouTube URL."""
     global looping, current_url
+    global current_title, current_duration, current_webpage_url, current_thumbnail, current_requester_id
+
+    vc = ctx.voice_client
+    if vc and (vc.is_playing() or vc.is_paused()):
+        try:
+            # extract metadata for a single video
+            with youtube_dl.YoutubeDL(YDL_SEARCH_OPTS) as ydl:
+                info = ydl.extract_info(url, download=False)
+            link = info.get("webpage_url") or url
+            title = info.get("title", "Unknown")
+            duration = info.get("duration")
+            queues[ctx.guild.id].append((link, title, ctx.author.id, duration))
+            await ctx.send(f"Added **{title}** to the queue.")
+        except Exception as e:
+            await ctx.send(f"Failed to queue track: {e}")
+        return
 
     if not ctx.voice_client:
-        await ctx.invoke(join)  # Have the bot join first if not in VC
+        await ctx.invoke(join)  # join first
 
-    ydl_opts = {
-        'format': 'bestaudio/best',
-        'noplaylist': True,
-        'quiet': True
-    }
-
-    with youtube_dl.YoutubeDL(ydl_opts) as ydl:
+    # --- extract once for initial play ---
+    with youtube_dl.YoutubeDL(YDL_SEARCH_OPTS) as ydl:
         try:
             info = ydl.extract_info(url, download=False)
-            url2 = info['url']
+            stream_url = info["url"]
+            headers = info.get("http_headers") or {}
         except Exception as e:
             await ctx.send(f"Error extracting audio: {e}")
             return
 
-    current_url = url  # Store the current song for looping
-    title = info.get("title","unknown")
-    duration = info.get("duration")
-    webpage = info.get("webpage_url") or url
-    thumb = info.get("thumbnail") or (info.get("thumbnails") or [{}])[-1].get("url")
-
-    global current_title, current_duration, current_webpage_url, current_thumbnail, current_requester_id
-    current_title = title
-    current_duration = duration
-    current_webpage_url = webpage
-    current_thumbnail = thumb
+    # --- store metadata for nowplaying/seek ---
+    current_url = info.get("webpage_url") or url
+    current_title = info.get("title", "Unknown")
+    current_duration = info.get("duration")
+    current_webpage_url = current_url
+    current_thumbnail = info.get("thumbnail") or (info.get("thumbnails") or [{}])[-1].get("url")
     current_requester_id = ctx.author.id
 
-    def after_playing(error):
-        if error:
-            print(f"Error: {error}")
+    # --- ffmpeg options (headers + reconnect) ---
+    headers_blob = _headers_str(headers)
+    before = (
+        (f'-headers "{headers_blob}" ' if headers_blob else "")
+        + "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 "
+        + '-user_agent "Mozilla/5.0"'
+    )
+    opts = "-vn -err_detect ignore_err"
 
-        if looping and current_url:
-            ctx.voice_client.play(discord.FFmpegPCMAudio(url2, options='-vn'), after=after_playing)
-        else:
-            print("Finished playing.")
+    vc = ctx.voice_client
 
-    ctx.voice_client.stop()
-    ctx.voice_client.play(discord.FFmpegPCMAudio(url2, options='-vn'), after=after_playing)
+    async def _loop_restart():
+        """Re-extract & restart the current track for loop."""
+        # If we lost VC, bail quietly
+        if not vc or not vc.is_connected():
+            return
+        try:
+            with youtube_dl.YoutubeDL(YDL_SEARCH_OPTS) as y2:
+                i2 = y2.extract_info(current_webpage_url, download=False)
+                s2 = i2["url"]
+                h2 = i2.get("http_headers") or {}
+            hb2 = _headers_str(h2)
+            bef2 = (
+                (f'-headers "{hb2}" ' if hb2 else "")
+                + "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 "
+                + '-user_agent "Mozilla/5.0"'
+            )
+            vc.stop()
+            base2 = discord.FFmpegPCMAudio(s2, before_options=bef2, options=opts)
+            src2 = discord.PCMVolumeTransformer(base2, volume=volume)
+            vc.play(src2, after=make_after())
+        except Exception as ee:
+            print("Loop re-extract/play failed:", ee)
 
-    await ctx.send(f"Now playing: {info.get('title', 'Unknown')}")
+    def make_after():
+        def _after(error: Exception | None):
+            if error:
+                print(f"FFmpeg after() error: {error}")
+            elif looping and current_webpage_url:
+                ctx.bot.loop.create_task(_loop_restart())
+            else:
+                # when finished, advance the queue
+                ctx.bot.loop.create_task(play_next_in_queue(ctx))
+        return _after
+
+    # start playback
+    vc.stop()
+    base_source = discord.FFmpegPCMAudio(stream_url,before_options=before, options =opts)
+    source = discord.PCMVolumeTransformer(base_source,volume=volume)
+    vc.play(source, after=make_after())
+
+    await ctx.send(f"Now playing: {current_title}")
 
 bot.run("INSERT_YOUR_TOKEN_HERE")
 

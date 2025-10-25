@@ -1,112 +1,126 @@
-#  Athena – A Simple Discord Music Bot
+# Athena – A Simple Discord Music Bot  
 
-Have you ever wanted to play music in yiur Discord VC with a youtube link and you both hate the built-in watch together (ads) and can't find whatever you need on spotify? Fear no more! Your self-hostable solution is here!
+Have you ever wanted to play music in your Discord VC using YouTube links, but hate the built-in Watch Together ads or can’t find what you want on Spotify?  
+**Fear no more, your self-hostable solution is here!**  
 
-Athena is a lightweight music bot for Discord written in Python using [discord.py](https://discordpy.readthedocs.io/) and [yt-dlp](https://github.com/yt-dlp/yt-dlp).  
-It can join your voice channels, play music directly from YouTube links or search queries, and provides basic queue and playback controls.
-
-With a little bit of setup, you can have your own music bot for your own server.
+**Athena** is a lightweight, open-source Discord music bot written in Python using [discord.py](https://discordpy.readthedocs.io/) and [yt-dlp](https://github.com/yt-dlp/yt-dlp).  
+She can join your voice channels, play and queue music directly from YouTube, and more! 
 
 ---
 
-##  Features
--  **Join/Leave** voice channels on command  
--  **Play music** from YouTube URLs or searches  
+##  Features  
+
+-  **Join / Leave** voice channels on demand  
+-  **Play music** from YouTube URLs or search queries  
 -  **Pause / Resume** playback  
 -  **Skip** the current track  
 -  **Loop** the current song  
--  **Now Playing** info with title, duration, thumbnail, and requester  
--  **Search + Pick**: search YouTube with `&search <query>` and pick results with `&pick <1-5>`  
-
-##  Installation
-
-### Requirements
-- Python 3.10+
-- [FFmpeg](https://ffmpeg.org/) (must be installed and available in your system PATH)
-- Dependencies:  
-```bash
- pip install discord.py yt-dlp pynacl
-```
-  
+-  **Volume Control** up to 200%  
+-  **Queue System** with `&queue`, `&skipto`, `&shuffle`, and `&clear`  
+-  **Seek** to a specific timestamp 
+-  **Search + Pick**: search YouTube with `&search <query>` and select results with `&pick <1–5>`  
+-  **Playlist Support**: enqueue entire YouTube playlists  
+- **Now Playing** embed with title, duration, thumbnail, and requester   
 
 ---
 
-Clone the repo 
+##  Installation  
+
+### Requirements  
+
+- **Python 3.10+**  
+- **FFmpeg** (must be installed and available in your system PATH)  
+- **Dependencies**:  
+  ```bash
+  pip install discord.py yt-dlp PyNaCl
+  ```
+
+---
+
+### Clone the Repository  
 
 ```bash
 git clone https://github.com/YOURUSERNAME/Athena.git
 cd Athena
 ```
 
+---
 
-Set up your bot token
+### Set Up Your Bot Token  
 
-Go to the Discord Developer Portal
-.
+1. Go to the [Discord Developer Portal](https://discord.com/developers/applications).  
+2. Create an application → Add a **bot user**.  
+3. Copy the **Bot Token** and store it safely as an environment variable:  
 
-Create an application → Add a bot.
+   ```bash
+   export DISCORD_BOT_TOKEN="your_token_here"
+   ```
+   **Windows PowerShell**:
+   ```powershell
+   setx DISCORD_BOT_TOKEN "your_token_here"
+   ```
 
-Copy the Bot Token and store it securely in an environment variable:
-
-export DISCORD_BOT_TOKEN="your_token_here"
-
-
-(On Windows PowerShell: setx DISCORD_BOT_TOKEN "your_token_here")
-
- Never commit your bot token to GitHub.
-Use .env files or environment variables to keep secrets safe.
+>  **Never commit your token** to GitHub. Use environment variables or `.env` files to keep secrets safe.
 
 ---
 
-## Usage
+##  Usage  
 
-Run Athena by simply typing
-
+Run Athena with:  
 ```bash
- python Athena.py
+python Athena.py
 ```
 
-As mentioned above, you will need to register your application in the Discord developer dashboard, I'll be happy to provide more instructions if more are necessary!
-
-Once registered, you simply need to add Athena to your personal server using the appropriate OAuth2 URL, and after that, you're golden!
-
+Invite your bot to a server using the OAuth2 URL generated from the Developer Portal (scopes: `bot`, `applications.commands`; permissions: *Connect*, *Speak*, *Send Messages*).  
+Once she’s in your server, summon her to your VC with `&join` and start playing music.
 
 ---
 
-## Commands
+## 🎛️ Commands  
 
-- `&join` – Have the bot join your current voice channel  
-- `&leave` – Disconnect the bot from the channel  
-- `&play <url>` – Play a YouTube song (auto-joins if not in VC)  
-- `&pause` – Pause playback  
-- `&resume` – Resume playback  
-- `&skip` – Skip the current song  
-- `&loop` – Toggle looping the current track  
-- `&nowplaying` – Show details of the current song  
-- `&search <query>` – Search YouTube for a song (lists 5 results)  
-- `&pick <1-5>` – Play one of the search results  
-- `&help` – Display all commands  
-
-
----
-
-## Roadmap
-
-The next features I plan to implement are:
-
--  **Queue**  Queue up songs and skip/return between them. 
--  **Seek** Skip to a precise point in the song (1:30 for example)  
--  **Volume Control** Change Volume up/down  
--  **Reaction Based Controls** Click buttons on nowplaying instead of typing to use its features!  
-- **Spotify Support** Use Spotify URLs as well as Youtube ones. 
-
+| Command | Description |
+|----------|-------------|
+| `&join` | Join your current voice channel |
+| `&leave` | Disconnect from the voice channel |
+| `&play <url>` | Play a YouTube video |
+| `&pause` | Pause playback |
+| `&resume` | Resume playback |
+| `&skip` | Skip the current song |
+| `&loop` | Toggle looping for the current track |
+| `&nowplaying` | Display the current song info |
+| `&queue` | Show queued songs |
+| `&skipto <index>` | Skip directly to a position in the queue |
+| `&shuffle` | Randomize queue order |
+| `&clear` | Clear the queue |
+| `&vol <0-200>` | Change playback volume |
+| `&seek <time>` | Jump to a specific timestamp |
+| `&search <query>` | Search YouTube for songs |
+| `&pick <1-5>` | Play one of the search results |
+| `&playlist <url>` | Add an entire YouTube playlist |
+| `&move <old> <new>` | Reorder a track in the queue |
 
 ---
 
-## Contributing.
+##  Roadmap  
 
-Pull requests are more than welcome! Please feel free to fork and extend Athena's features for your own use!
+Future updates planned for Athena include:  
+-  **Spotify Support**  
+-  **Lyrics Integration** using public APIs  
+-  **Docker & Systemd Deployment** for easy hosting  
 
+---
 
+##  Contributing  
 
+Pull requests are welcome!  
+If you’d like to improve Athena or add new features, feel free to fork the repository and open a PR.  
+Bug reports and feature requests can be submitted through the GitHub Issues tab.
 
+---
+
+## Credits  
+
+- [discord.py](https://github.com/Rapptz/discord.py)  
+- [yt-dlp](https://github.com/yt-dlp/yt-dlp)  
+- FFmpeg project  
+- All my friends who helped me test it!  
